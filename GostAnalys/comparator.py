@@ -1,10 +1,13 @@
 import json
 import time
 import threading
+import logging
 from typing import List, Dict
 from openai import OpenAI
 from pydantic import BaseModel, Field
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 
 class AIAnalysisResult(BaseModel):
@@ -57,7 +60,9 @@ class AIComparator:
                     )
                 return self._parse_json_response(resp.choices[0].message.content)
             except Exception as e:
+                logger.warning(f"Попытка {attempt + 1}/{self.max_retries} не удалась: {e}")
                 if attempt == self.max_retries - 1:
+                    logger.error(f"Ошибка анализа пары: {e}")
                     return {"logical_contradictions": [], "semantic_gaps": [], "error": str(e)}
                 time.sleep(2 ** attempt)
 
@@ -65,19 +70,34 @@ class AIComparator:
         """Параллельно анализирует все релевантные пары."""
         import numpy as np
         from embedder import find_top_k_matches
+        import concurrent.futures
 
         all_contras = []
         all_gaps = []
-        import concurrent.futures
 
         def process_chunk(idx):
-            if doc_embs.size == 0: return
+            """Обрабатывает один чанк документа против всех релевантных чанков эталона."""
+            if doc_embs.size == 0:
+                return None
+            
             top_k = find_top_k_matches(doc_embs[idx], ref_embs, k=3)
+            if not top_k:
+                return {"logical_contradictions": [], "semantic_gaps": []}
+            
+            # ИСПРАВЛЕНИЕ: Анализируем ВСЕ релевантные пары, а не только первую
+            chunk_contras = []
+            chunk_gaps = []
+            
             for r_idx in top_k:
                 res = self.analyze_pair(ref_chunks[r_idx], doc_chunks[idx])
                 if "error" not in res:
-                    return res
-            return {"logical_contradictions": [], "semantic_gaps": []}
+                    chunk_contras.extend(res.get("logical_contradictions", []))
+                    chunk_gaps.extend(res.get("semantic_gaps", []))
+            
+            return {
+                "logical_contradictions": chunk_contras,
+                "semantic_gaps": chunk_gaps
+            }
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
             results = list(executor.map(process_chunk, range(len(doc_chunks))))
