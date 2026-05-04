@@ -1,0 +1,18 @@
+# Зависимости для AnalysDocument - AI аудита технической документации
+
+# Core dependencies
+openai>=1.0.0
+pydantic>=2.0.0
+python-docx>=0.8.11
+sentence-transformers>=2.2.0
+scikit-learn>=1.0.0
+numpy>=1.21.0
+
+# UI/Output
+rich>=13.0.0
+
+# Environment management
+python-dotenv>=1.0.0
+
+# Optional: для лучшей совместимости
+requests>=2.28.0
