@@ -1,4 +1,5 @@
 import os
+import logging
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from embedder import EmbeddingEngine
@@ -10,14 +11,22 @@ from report_generator import format_console_report, save_report
 from rich.console import Console
 
 console = Console()
+logger = logging.getLogger(__name__)
+
+# Настройка логирования
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 
 
 class AppConfig:
     def __init__(self):
-        self.api_key = "sk-af35d0bd276443cd8cb193dd3a22d6ab"
-        self.base_url = "https://api.deepseek.com/v1"
-        self.model = "deepseek-chat"
-        self.max_workers = 4
+        # ИСПРАВЛЕНИЕ: Загружаем API ключ из переменных окружения вместо хардкода
+        self.api_key = os.getenv("DEEPSEEK_API_KEY", "")
+        self.base_url = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
+        self.model = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+        self.max_workers = int(os.getenv("MAX_WORKERS", "4"))
         self.etalons = {"ТР ТС 21": {"chunks": [], "embs": None}, "МР 2.3": {"chunks": [], "embs": None}}
         self.reports = []
         self.engine = EmbeddingEngine.get_instance()
@@ -25,23 +34,32 @@ class AppConfig:
 
 
 def load_etalons(config: AppConfig) -> bool:
-    etalon_dir = Path("./etalons")
+    # ИСПРАВЛЕНИЕ: Используем абсолютный путь на основе расположения скрипта
+    etalon_dir = Path(__file__).parent / "etalons"
+    
     if not etalon_dir.exists():
-        console.print("[red]❌ Папка ./etalons/ не найдена. Поместите туда trts21.* и mr23.*[/]")
+        console.print(f"[red]❌ Папка {etalon_dir} не найдена. Поместите туда trts21.* и mr23.*[/]")
+        logger.error(f"Папка эталонов не найдена: {etalon_dir}")
         return False
 
     for name, pattern in [("ТР ТС 21", "trts21.*"), ("МР 2.3", "mr23.*")]:
         files = list(etalon_dir.glob(pattern))
         if not files:
-            console.print(f"[red]❌ Не найден файл {pattern} в ./etalons/[/]")
+            console.print(f"[red]❌ Не найден файл {pattern} в {etalon_dir}/[/]")
+            logger.error(f"Не найден эталон: {pattern}")
             return False
         try:
             text = load_document(str(files[0]))
             config.etalons[name]["chunks"] = split_into_chunks(text)
-            config.etalons[name]["embs"] = config.engine.embed_chunks(config.etalons[name]["chunks"], doc_id=f"etalon_{name.replace(' ', '_')}")
+            config.etalons[name]["embs"] = config.engine.embed_chunks(
+                config.etalons[name]["chunks"],
+                doc_id=f"etalon_{name.replace(' ', '_')}"
+            )
             console.print(f"[green]✅[/] {name}: {len(config.etalons[name]['chunks'])} блоков загружено и кэшировано.")
+            logger.info(f"Эталон {name} загружен: {len(config.etalons[name]['chunks'])} блоков")
         except Exception as e:
             console.print(f"[red]❌ Ошибка загрузки {name}: {e}[/]")
+            logger.error(f"Ошибка загрузки эталона {name}: {e}")
             return False
     return True
 
@@ -61,26 +79,32 @@ def analyze_file(filepath: str, config: AppConfig) -> dict:
         )
         mr23_res = config.comparator.batch_analyze(
             config.etalons["МР 2.3"]["chunks"], chunks,
-            config.etalons["МР 2.3"]["embs"], doc_embs
+            config.eталons["МР 2.3"]["embs"], doc_embs
         )
 
         # Структурный анализ
         trts_res["structure_issues"] = analyze_structure_ai(config.comparator.client, config.model, text, doc_type)
         mr23_res["structure_issues"] = []  # Структура проверяется один раз
 
+        logger.info(f"Анализ завершён: {fname} ({doc_type})")
         return {"filename": fname, "type": doc_type, "trts": trts_res, "mr23": mr23_res}
     except Exception as e:
         console.print(f"[yellow]⚠️ Ошибка {filepath}: {e}[/]")
+        logger.error(f"Ошибка при анализе файла {filepath}: {e}")
         return None
+
 
 def run_batch(folder: str, config: AppConfig):
     p = Path(folder)
     files = [f for f in p.rglob("*") if f.suffix.lower() in ['.txt', '.docx']]
     if not files:
         console.print("[red]❌ Файлы не найдены.[/]")
+        logger.warning(f"Файлы не найдены в {folder}")
         return
 
     console.print(f"\n🚀 Запуск анализа [cyan]{len(files)}[/] файлов ({config.max_workers} потоков)...\n")
+    logger.info(f"Начало анализа {len(files)} файлов")
+    
     results = []
     with ThreadPoolExecutor(max_workers=config.max_workers) as exec:
         futures = {exec.submit(analyze_file, str(f), config): f for f in files}
@@ -90,13 +114,21 @@ def run_batch(folder: str, config: AppConfig):
                 results.append(res)
                 console.print(format_console_report(res["filename"], res["type"], res["trts"], res["mr23"]))
                 console.print("-" * 60)
+    
     config.reports = results
     console.print(f"\n✅ Готово. Обработано: {len(results)}/{len(files)}")
+    logger.info(f"Анализ завершён: обработано {len(results)}/{len(files)} файлов")
 
 
 def main():
     config = AppConfig()
     console.print("\n[bold blue]=== AI-АНАЛИЗАТОР ДОКУМЕНТОВ (ТР ТС 21 / МР 2.3) ===[/]")
+
+    # Проверка наличия API ключа
+    if not config.api_key:
+        console.print("[yellow]⚠️ ВНИМАНИЕ: Переменная окружения DEEPSEEK_API_KEY не установлена![/]")
+        console.print("[yellow]Установите её перед использованием: export DEEPSEEK_API_KEY='ваш_ключ'[/]")
+        logger.warning("API ключ не установлен в переменных окружения")
 
     while True:
         console.print("\n[bold]Меню:[/]")
@@ -110,11 +142,18 @@ def main():
         choice = input("\n👉 Введите номер: ").strip()
 
         if choice == '1':
-            config.api_key = input("API Key: ").strip() or config.api_key
-            config.base_url = input("Base URL (Enter=OpenAI): ").strip() or config.base_url
-            config.model = input("Model (Enter=gpt-4o-mini): ").strip() or config.model
+            config.api_key = input("API Key (или Enter для текущего): ").strip() or config.api_key
+            config.base_url = input("Base URL (Enter=DeepSeek): ").strip() or config.base_url
+            config.model = input("Model (Enter=deepseek-chat): ").strip() or config.model
+            
+            if not config.api_key:
+                console.print("[red]❌ API ключ не может быть пустым![/]")
+                logger.error("Попытка установить пустой API ключ")
+                continue
+            
             config.comparator = AIComparator(config.api_key, config.base_url, config.model)
             console.print("[green]✅ Настройки AI применены.[/]")
+            logger.info("Настройки AI обновлены")
         elif choice == '2':
             if load_etalons(config):
                 console.print("[green]✨ Эталоны готовы к анализу.[/]")
@@ -125,6 +164,7 @@ def main():
             folder = input("📂 Путь к папке: ").strip().strip('"')
             if not Path(folder).exists():
                 console.print("[red]❌ Папка не найдена.[/]")
+                logger.warning(f"Папка не найдена: {folder}")
                 continue
             run_batch(folder, config)
         elif choice == '4':
@@ -134,6 +174,7 @@ def main():
             fpath = input("📄 Путь к файлу: ").strip().strip('"')
             if not Path(fpath).exists():
                 console.print("[red]❌ Файл не найден.[/]")
+                logger.warning(f"Файл не найден: {fpath}")
                 continue
             res = analyze_file(fpath, config)
             if res:
@@ -146,6 +187,7 @@ def main():
             fmt = input("Формат (json/txt): ").strip().lower()
             name = input("Имя файла (report.json): ").strip() or "report.json"
             save_report(config.reports, name, fmt)
+            logger.info(f"Отчёт сохранён: {name}")
         elif choice == '6':
             break
         else:
