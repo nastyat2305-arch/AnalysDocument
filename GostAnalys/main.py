@@ -2,6 +2,8 @@ import os
 import logging
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Any
+
 from embedder import EmbeddingEngine
 from file_loader import load_document, detect_document_type
 from text_splitter import split_into_chunks
@@ -36,7 +38,7 @@ class AppConfig:
 def load_etalons(config: AppConfig) -> bool:
     # ИСПРАВЛЕНИЕ: Используем абсолютный путь на основе расположения скрипта
     etalon_dir = Path(__file__).parent / "etalons"
-    
+
     if not etalon_dir.exists():
         console.print(f"[red]❌ Папка {etalon_dir} не найдена. Поместите туда trts21.* и mr23.*[/]")
         logger.error(f"Папка эталонов не найдена: {etalon_dir}")
@@ -51,10 +53,7 @@ def load_etalons(config: AppConfig) -> bool:
         try:
             text = load_document(str(files[0]))
             config.etalons[name]["chunks"] = split_into_chunks(text)
-            config.etalons[name]["embs"] = config.engine.embed_chunks(
-                config.etalons[name]["chunks"],
-                doc_id=f"etalon_{name.replace(' ', '_')}"
-            )
+            config.etalons[name]["embs"] = config.engine.embed_chunks(config.etalons[name]["chunks"],doc_id=f"etalon_{name.replace(' ', '_')}")
             console.print(f"[green]✅[/] {name}: {len(config.etalons[name]['chunks'])} блоков загружено и кэшировано.")
             logger.info(f"Эталон {name} загружен: {len(config.etalons[name]['chunks'])} блоков")
         except Exception as e:
@@ -64,7 +63,7 @@ def load_etalons(config: AppConfig) -> bool:
     return True
 
 
-def analyze_file(filepath: str, config: AppConfig) -> dict:
+def analyze_file(filepath: str, config: AppConfig) -> dict[str, str | Any] | None:
     try:
         text = load_document(filepath)
         fname = Path(filepath).name
@@ -79,7 +78,7 @@ def analyze_file(filepath: str, config: AppConfig) -> dict:
         )
         mr23_res = config.comparator.batch_analyze(
             config.etalons["МР 2.3"]["chunks"], chunks,
-            config.eталons["МР 2.3"]["embs"], doc_embs
+            config.etalons["МР 2.3"]["embs"], doc_embs
         )
 
         # Структурный анализ
@@ -96,7 +95,7 @@ def analyze_file(filepath: str, config: AppConfig) -> dict:
 
 def run_batch(folder: str, config: AppConfig):
     p = Path(folder)
-   files = [f for f in p.rglob("*") if f.suffix.lower() == '.txt']
+    files = [f for f in p.rglob("*") if f.suffix.lower() == '.txt']
     if not files:
         console.print("[red]❌ Файлы не найдены.[/]")
         logger.warning(f"Файлы не найдены в {folder}")
@@ -104,17 +103,17 @@ def run_batch(folder: str, config: AppConfig):
 
     console.print(f"\n🚀 Запуск анализа [cyan]{len(files)}[/] файлов ({config.max_workers} потоков)...\n")
     logger.info(f"Начало анализа {len(files)} файлов")
-    
+
     results = []
-    with ThreadPoolExecutor(max_workers=config.max_workers) as exec:
-        futures = {exec.submit(analyze_file, str(f), config): f for f in files}
+    with ThreadPoolExecutor(max_workers=config.max_workers) as executor:
+        futures = {executor.submit(analyze_file, str(f), config): f for f in files}
         for i, f in enumerate(as_completed(futures), 1):
             res = f.result()
             if res:
                 results.append(res)
                 console.print(format_console_report(res["filename"], res["type"], res["trts"], res["mr23"]))
                 console.print("-" * 60)
-    
+
     config.reports = results
     console.print(f"\n✅ Готово. Обработано: {len(results)}/{len(files)}")
     logger.info(f"Анализ завершён: обработано {len(results)}/{len(files)} файлов")
@@ -145,12 +144,12 @@ def main():
             config.api_key = input("API Key (или Enter для текущего): ").strip() or config.api_key
             config.base_url = input("Base URL (Enter=DeepSeek): ").strip() or config.base_url
             config.model = input("Model (Enter=deepseek-chat): ").strip() or config.model
-            
+
             if not config.api_key:
                 console.print("[red]❌ API ключ не может быть пустым![/]")
                 logger.error("Попытка установить пустой API ключ")
                 continue
-            
+
             config.comparator = AIComparator(config.api_key, config.base_url, config.model)
             console.print("[green]✅ Настройки AI применены.[/]")
             logger.info("Настройки AI обновлены")
