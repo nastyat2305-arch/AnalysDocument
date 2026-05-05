@@ -96,7 +96,7 @@ def analyze_file(filepath: str, config: AppConfig) -> dict:
 
 def run_batch(folder: str, config: AppConfig):
     p = Path(folder)
-    files = [f for f in p.rglob("*") if f.suffix.lower() in ['.txt', '.docx']]
+   files = [f for f in p.rglob("*") if f.suffix.lower() == '.txt']
     if not files:
         console.print("[red]❌ Файлы не найдены.[/]")
         logger.warning(f"Файлы не найдены в {folder}")
