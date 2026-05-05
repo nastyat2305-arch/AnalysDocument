@@ -1,23 +1,20 @@
 from pathlib import Path
-from docx import Document
+
 
 
 
 def load_document(filepath: str) -> str:
-    """Загружает текст из .txt или .docx с обработкой ошибок кодировки."""
+    """Загружает текст из .txt файла."""
     p = Path(filepath)
     if not p.exists():
         raise FileNotFoundError(f"Файл не найден: {filepath}")
 
     ext = p.suffix.lower()
+    if ext != '.txt':
+        raise ValueError("Поддерживается только формат .txt")
+    
     try:
-        if ext == '.txt':
-            return p.read_text(encoding='utf-8-sig')
-        elif ext == '.docx':
-            doc = Document(str(p))
-            return '\n'.join([p.text for p in doc.paragraphs if p.text.strip()])
-        else:
-            raise ValueError("Поддерживаются только .txt и .docx")
+        return p.read_text(encoding='utf-8-sig')
     except Exception as e:
         raise RuntimeError(f"Ошибка чтения {filepath}: {e}")
 
