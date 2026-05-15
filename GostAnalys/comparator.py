@@ -15,6 +15,50 @@ class AIAnalysisResult(BaseModel):
     semantic_gaps: List[Dict[str, str]] = Field(..., description="Смысловые разрывы")
 
 
+CROSS_DOMAIN_BLACKLIST = {
+    ("microbiology", "packaging"),  # микробиология ≠ упаковка
+    ("chemical", "organizational"),  # хим.показатели ≠ ХАССП
+    ("raw_materials", "organizational"),  # сырьё ≠ спецодежда
+}
+
+
+def _domains_compatible(ref_meta: dict, doc_meta: dict) -> bool:
+    """Проверяет, есть ли пересечение доменов или оба — 'general'."""
+    ref_types = set(ref_meta.get("type", []))
+    doc_types = set(doc_meta.get("type", []))
+
+    # Если есть пересечение — разрешаем
+    if ref_types & doc_types:
+        return True
+
+    # Если хотя бы один чанк — организационный, а другой — технический,
+    # проверяем чёрный список
+    for r_type in ref_types:
+        for d_type in doc_types:
+            if (r_type, d_type) in CROSS_DOMAIN_BLACKLIST or (d_type, r_type) in CROSS_DOMAIN_BLACKLIST:
+                return False
+    return True  # Пограничные случаи пропускаем для LLM
+
+
+def _numerical_context_match(ref_nums: List[Dict], doc_nums: List[Dict], tolerance: float = 0.1) -> Dict:
+    """Сравнивает числовые показатели с учётом единиц и условий."""
+    if not ref_nums or not doc_nums:
+        return {"match": True, "details": "no_numbers"}  # Нет чисел — не блокируем
+
+    matches = []
+    for rn in ref_nums:
+        for dn in doc_nums:
+            # Сравниваем только если единицы совпадают или одна отсутствует
+            if rn["unit"] and dn["unit"] and rn["unit"].lower() != dn["unit"].lower():
+                continue  # Разные единицы — пропуск
+            # Сравниваем значения с допуском
+            if abs(rn["value"] - dn["value"]) / max(rn["value"], 1e-6) <= tolerance:
+                matches.append({"ref": rn["raw"], "doc": dn["raw"], "diff": abs(rn["value"] - dn["value"])})
+
+    return {
+        "match": bool(matches),
+        "details": matches if matches else "value_mismatch"
+    }
 class AIComparator:
     def __init__(self, api_key: str, base_url: str, model: str, max_retries: int = 3):
         self.client = OpenAI(api_key=api_key, base_url=base_url)
@@ -33,18 +77,29 @@ class AIComparator:
             cleaned = cleaned[:-3]
         return json.loads(cleaned.strip())
 
-    def analyze_pair(self, ref_chunk: str, doc_chunk: str) -> Dict:
-        """Отправляет пару фрагментов в LLM для анализа."""
+    def analyze_pair(self, ref_chunk: str, doc_chunk: str, numeric_context: str = None) -> Dict:
+        numeric_hint = f"\n⚠️ КОНТЕКСТ ЧИСЕЛ: {numeric_context}" if numeric_context else ""
+
         prompt = (
-            f"Ты — эксперт по нормативным документам. Сравни фрагмент эталона и фрагмент документа.\n"
-            f"ЭТАЛОН: \"{ref_chunk[:400]}\"\n"
-            f"ДОКУМЕНТ: \"{doc_chunk[:400]}\"\n\n"
-            f"Найди:\n"
-            f"1. Логические противоречия (противоположные числа, условия, требования).\n"
-            f"2. Смысловые разрывы (важные детали эталона, отсутствующие или искажённые в документе).\n"
-            f"Верни ТОЛЬКО валидный JSON формата:\n"
-            f"{{\n  \"logical_contradictions\": [{{\"ref\": \"...\", \"doc\": \"...\", \"reason\": \"...\"}}],\n"
-            f"  \"semantic_gaps\": [{{\"ref_req\": \"...\", \"missing_context\": \"...\"}}]\n"
+            f"Ты — эксперт по нормативным документам в пищевой промышленности. "
+            f"Сравни фрагмент эталона и фрагмент документа.\n\n"
+            f"📋 ЭТАЛОН:\n{ref_chunk[:500]}\n\n"
+            f"📄 ДОКУМЕНТ:\n{doc_chunk[:500]}{numeric_hint}\n\n"
+            f"🎯 ЗАДАЧА:\n"
+            f"1. Определи, релевантны ли эти фрагменты для сравнения (is_relevant: bool).\n"
+            f"   — НЕ релевантны, если: разные домены (микробиология ↔ упаковка), "
+            f"   организационные требования ↔ технические параметры без связи, "
+            f"   числа с разными единицами без контекста.\n"
+            f"2. Если is_relevant=true, найди:\n"
+            f"   • Логические противоречия (противоположные числа, условия, требования)\n"
+            f"   • Смысловые разрывы (важные детали эталона, отсутствующие в документе)\n"
+            f"3. Если is_relevant=false, укажи причину в relevant_reason.\n\n"
+            f"📦 ВЕРНИ ТОЛЬКО валидный JSON:\n"
+            f"{{\n"
+            f'  "is_relevant": true,\n'
+            f'  "relevant_reason": "краткое обоснование (если false)",\n'
+            f'  "logical_contradictions": [{{"ref": "...", "doc": "...", "reason": "..."}}],\n'
+            f'  "semantic_gaps": [{{"ref_req": "...", "missing_context": "..."}}]\n'
             f"}}"
         )
 
@@ -76,28 +131,57 @@ class AIComparator:
         all_gaps = []
 
         def process_chunk(idx):
-            """Обрабатывает один чанк документа против всех релевантных чанков эталона."""
             if doc_embs.size == 0:
                 return None
-            
-            top_k = find_top_k_matches(doc_embs[idx], ref_embs, k=3)
+
+            top_k = find_top_k_matches(doc_embs[idx], ref_embs, k=5)  # Увеличиваем k для отбора
             if not top_k:
                 return {"logical_contradictions": [], "semantic_gaps": []}
-            
-            # ИСПРАВЛЕНИЕ: Анализируем ВСЕ релевантные пары, а не только первую
+
             chunk_contras = []
             chunk_gaps = []
-            
+
             for r_idx in top_k:
-                res = self.analyze_pair(ref_chunks[r_idx], doc_chunks[idx])
-                if "error" not in res:
+                # === НОВАЯ ЛОГИКА ПРЕ-ФИЛЬТРАЦИИ ===
+                ref_chunk = ref_chunks[r_idx]
+                doc_chunk = doc_chunks[idx]
+
+                # Извлекаем метаданные (поддержка старых str-чанков)
+                ref_meta = ref_chunk.get("meta", {}) if isinstance(ref_chunk, dict) else {}
+                doc_meta = doc_chunk.get("meta", {}) if isinstance(doc_chunk, dict) else {}
+                ref_nums = ref_chunk.get("numerics", []) if isinstance(ref_chunk, dict) else []
+                doc_nums = doc_chunk.get("numerics", []) if isinstance(doc_chunk, dict) else []
+
+                # 1. Проверка доменной совместимости
+                if not _domains_compatible(ref_meta, doc_meta):
+                    continue  # Пропускаем заведомо нерелевантную пару
+
+                # 2. Проверка числового контекста (если есть числа)
+                num_check = _numerical_context_match(ref_nums, doc_nums)
+                if not num_check["match"] and num_check["details"] != "no_numbers":
+                    # Не блокируем полностью, но добавляем контекст для LLM
+                    numeric_warning = f"⚠️ Числа: {num_check['details']}"
+                else:
+                    numeric_warning = None
+
+                # === ОТПРАВКА В LLM С ДОП. КОНТЕКСТОМ ===
+                res = self.analyze_pair(
+                    ref_chunk["text"] if isinstance(ref_chunk, dict) else ref_chunk,
+                    doc_chunk["text"] if isinstance(doc_chunk, dict) else doc_chunk,
+                    numeric_context=numeric_warning  # Новый параметр
+                )
+
+                # Фильтруем результаты по флагу is_relevant
+                if "error" not in res and res.get("is_relevant", True):
                     chunk_contras.extend(res.get("logical_contradictions", []))
                     chunk_gaps.extend(res.get("semantic_gaps", []))
-            
+
             return {
                 "logical_contradictions": chunk_contras,
                 "semantic_gaps": chunk_gaps
             }
+            
+            
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
             results = list(executor.map(process_chunk, range(len(doc_chunks))))
