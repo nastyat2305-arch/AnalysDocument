@@ -3,7 +3,7 @@ import logging
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
-
+from typing import List, Dict
 from embedder import EmbeddingEngine
 from file_loader import load_document, detect_document_type
 from text_splitter import split_into_chunks
@@ -25,7 +25,7 @@ logging.basicConfig(
 class AppConfig:
     def __init__(self):
         # ИСПРАВЛЕНИЕ: Загружаем API ключ из переменных окружения вместо хардкода
-        self.api_key = os.getenv("DEEPSEEK_API_KEY", "")
+        self.api_key = os.getenv("DEEPSEEK_API_KEY", "sk-3f6492b7595844d386477be23b9c7920")
         self.base_url = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
         self.model = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
         self.max_workers = int(os.getenv("MAX_WORKERS", "4"))
