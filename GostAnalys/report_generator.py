@@ -2,7 +2,7 @@ import json
 import logging
 import re
 from rich.console import Console
-
+from typing import Dict
 console = Console()
 logger = logging.getLogger(__name__)
 
@@ -145,3 +145,40 @@ def save_report(reports: list, path: str, fmt: str = "json"):
     except Exception as e:
         console.print(f"[red]❌ Ошибка при сохранении отчёта: {e}[/]")
         logger.error(f"Ошибка при сохранении отчёта: {e}")
+
+
+# report_generator.py — ДОБАВИТЬ: сбор метрик качества фильтрации
+
+class FilterMetrics:
+    def __init__(self):
+        self.total_pairs = 0
+        self.filtered_by_heuristics = 0
+        self.filtered_by_llm = 0
+        self.processed_by_llm = 0
+        self.contradictions_found = 0
+        self.gaps_found = 0
+
+    def log_pair_decision(self, filtered_by: str = None, result: Dict = None):
+        self.total_pairs += 1
+        if filtered_by == "heuristics":
+            self.filtered_by_heuristics += 1
+        elif filtered_by == "llm_self_assessment":
+            self.filtered_by_llm += 1
+        else:
+            self.processed_by_llm += 1
+            if result:
+                self.contradictions_found += len(result.get("logical_contradictions", []))
+                self.gaps_found += len(result.get("semantic_gaps", []))
+
+    def summary(self) -> Dict:
+        noise_reduction = (self.filtered_by_heuristics + self.filtered_by_llm) / max(self.total_pairs, 1)
+        signal_retention = (self.contradictions_found + self.gaps_found) / max(self.processed_by_llm, 1)
+
+        return {
+            "total_pairs_evaluated": self.total_pairs,
+            "noise_filtered_out": f"{noise_reduction:.1%}",
+            "llm_calls_saved": self.filtered_by_heuristics,
+            "signal_per_llm_call": f"{signal_retention:.2f}",
+            "final_contradictions": self.contradictions_found,
+            "final_gaps": self.gaps_found
+        }
