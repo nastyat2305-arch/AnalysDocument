@@ -1,0 +1,29 @@
+# config.py — для управления порогами
+
+from dataclasses import dataclass
+
+
+@dataclass
+class FilterConfig:
+    # Доменная фильтрация
+    domain_filter_enabled: bool = True
+    domain_strict_mode: bool = False  # False = разрешать пересечение по любому тегу
+
+    # Числовая фильтрация
+    numeric_filter_enabled: bool = True
+    numeric_tolerance: float = 0.1  # 0.0 = строго, 1.0 = всегда пропускать
+
+    # Ключевые слова
+    min_keyword_overlap: int = 2  # минимум общих слов для прохода эвристики
+
+    # LLM self-assessment
+    llm_self_assessment_enabled: bool = True
+    respect_llm_relevance_flag: bool = True  # уважать is_relevant от LLM
+
+    # Отладка
+    verbose_filtering: bool = False  # логировать каждую отфильтрованную пару
+    bypass_filter_for_test: bool = False  # режим "песочницы"
+
+# Использование в main.py:
+# config = FilterConfig()
+# if args.debug: config.verbose_filtering = True
