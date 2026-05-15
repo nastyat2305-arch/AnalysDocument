@@ -28,18 +28,25 @@ class EmbeddingEngine:
         return os.path.join(self.cache_dir, f"emb_{safe}.pkl")
 
     def embed_chunks(self, chunks: list, doc_id: str = None) -> np.ndarray:
-        if not chunks: return np.array([])
+        """Принимает list[Dict] или list[str], извлекает текст для эмбеддинга."""
+        if not chunks:
+            return np.array([])
+
+        # Нормализация: если чанки — Dict, берём поле 'text'
+        texts = [c["text"] if isinstance(c, dict) else c for c in chunks]
+
         if doc_id and os.path.exists(self._cache_path(doc_id)):
             with open(self._cache_path(doc_id), 'rb') as f:
                 return np.array(pickle.load(f))
 
         with self._lock:
-            embs = self.model.encode(chunks, show_progress_bar=False, convert_to_numpy=True)
+            embs = self.model.encode(texts, show_progress_bar=False, convert_to_numpy=True)
 
         if doc_id:
             with open(self._cache_path(doc_id), 'wb') as f:
                 pickle.dump(embs.tolist(), f)
         return embs
+
 
 
 def find_top_k_matches(query_emb: np.ndarray, corpus_embs: np.ndarray, k: int = 3) -> list:
