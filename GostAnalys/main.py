@@ -25,7 +25,7 @@ logging.basicConfig(
 class AppConfig:
     def __init__(self):
         # ИСПРАВЛЕНИЕ: Загружаем API ключ из переменных окружения вместо хардкода
-        self.api_key = os.getenv("DEEPSEEK_API_KEY", "sk-3f6492b7595844d386477be23b9c7920")
+        self.api_key = os.getenv("DEEPSEEK_API_KEY", "ваш ключ")
         self.base_url = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
         self.model = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
         self.max_workers = int(os.getenv("MAX_WORKERS", "4"))
