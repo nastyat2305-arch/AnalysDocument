@@ -3,9 +3,6 @@
 
 # 📄 GOST Analyzer AI — Анализатор нормативной документации
 
-[![Python](https://img.shields.io/badge/Python-3.9+-blue.svg)](https://www.python.org/)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![AI](https://img.shields.io/badge/AI-RAG-orange.svg)]()
 
 **Автоматизированная система анализа технической документации на базе гибридной RAG-архитектуры**
 
@@ -152,5 +149,26 @@ Semaphore(5) предотвращает превышение лимитов API
 Повторные запуски используют кэш векторов, что снижает время подготовки эталонов до <1 сек.
 
 ---
+##  Источники и благодарности
 
-потом позже допишу и изменю, щас в падлу
+###  Образовательные ресурсы по RAG-архитектурам
+Отдельная благодарность авторам репозиториев, которые помогли разобраться в принципах построения RAG-систем:
+
+| Репозиторий | Описание |
+|-------------|----------|
+| [zakaria-statistics/rag-architecture](https://github.com/zakaria-statistics/rag-architecture) | Наглядные примеры и схемы реализации RAG-пайплайнов |
+| [operator13/16-rag-architectures](https://github.com/operator13/16-rag-architectures) | Коллекция из 16 архитектурных паттернов для RAG: от базовых до продвинутых |
+
+### 🔧 Используемые библиотеки
+Проект построен на следующих открытых инструментах:
+
+| Библиотека | Назначение | Лицензия |
+|-----------|-----------|----------|
+| [numpy/numpy](https://github.com/numpy/numpy) | Вычисления с векторами и матрицами, нормализация эмбеддингов | BSD-3 |
+| [huggingface/sentence-transformers](https://github.com/UKPLab/sentence-transformers) | Генерация семантических эмбеддингов для поиска похожих текстовых блоков | Apache 2.0 |
+| [openai/openai-python](https://github.com/openai/openai-python) | Универсальный клиент для работы с LLM (DeepSeek, Ollama, OpenAI) | Apache 2.0 |
+| [pydantic/pydantic](https://github.com/pydantic/pydantic) | Валидация данных и парсинг структурированных ответов от моделей | MIT |
+| [Textualize/rich](https://github.com/Textualize/rich) | Красивый вывод отчётов в консоль с подсветкой и таблицами | MIT |
+
+> 💡 Все библиотеки используются в соответствии с их лицензиями. Тексты лицензий доступны по ссылкам выше.
+Так же отдельная благодарность qwen и моему психотерапевту, за поддержку и помощь
